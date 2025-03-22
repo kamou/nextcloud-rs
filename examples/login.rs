@@ -1,9 +1,7 @@
-mod client;
-mod errors;
+use nextcloud_rs::client::{AuthData, NextcloudClient};
 
-use errors::NcError;
+use nextcloud_rs::errors::NcError;
 
-use client::{AuthData, NextcloudClient};
 use std::{fs, io};
 
 use log::{error, info};
