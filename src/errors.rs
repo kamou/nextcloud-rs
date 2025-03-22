@@ -1,3 +1,4 @@
+use confy;
 use reqwest::header::InvalidHeaderName;
 use thiserror::Error;
 
@@ -21,6 +22,9 @@ pub enum NcError {
     #[error("Header value contained invalid UTF-8 characters: {0}")]
     ToStrError(#[from] reqwest::header::ToStrError),
 
+    #[error("Could not convert config path to str")]
+    ConfigToStrError(),
+
     #[error("UTF-8 parse error: {0}")]
     Utf8Error(#[from] std::str::Utf8Error),
 
@@ -32,4 +36,11 @@ pub enum NcError {
 
     #[error("Missing required field: {0}")]
     MissingField(String),
+
+    #[error("Could not find home directory")]
+    MissingHomeDir,
+
+    // confy errors
+    #[error("Configuration error: {0}")]
+    Confy(#[from] confy::ConfyError),
 }

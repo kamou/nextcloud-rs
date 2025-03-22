@@ -14,15 +14,6 @@ pub struct AuthData {
 
     #[serde(rename = "appPassword")]
     app_password: String,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    server_url: Option<String>,
-}
-
-impl AuthData {
-    pub fn server_url(&self) -> Option<&str> {
-        self.server_url.as_deref()
-    }
 }
 
 #[derive(Deserialize, Debug)]
@@ -45,10 +36,10 @@ pub struct NextcloudClient {
 }
 
 impl NextcloudClient {
-    pub fn new() -> Self {
+    pub fn new(server_url: &str) -> Self {
         NextcloudClient {
             client: Client::new(),
-            server_url: None,
+            server_url: server_url.to_owned().into(),
             headers: HeaderMap::new(),
         }
     }
@@ -83,7 +74,6 @@ impl NextcloudClient {
 
     pub fn login_from_auth_data(&mut self, auth_data: &AuthData) -> Result<(), NcError> {
         let credentials = format!("{}:{}", auth_data.login_name, auth_data.app_password);
-        self.server_url = auth_data.server_url.clone();
 
         self.headers.insert(
             AUTHORIZATION,
@@ -95,8 +85,7 @@ impl NextcloudClient {
         })
     }
 
-    pub fn login(&mut self, server_url: &str) -> Result<AuthData, NcError> {
-        self.server_url = Some(server_url.to_owned());
+    pub fn login(&mut self) -> Result<AuthData, NcError> {
         let auth_data = self.perform_login_flow()?;
         let credentials = format!("{}:{}", auth_data.login_name, auth_data.app_password);
         let auth_header_value = format!("Basic {}", base64::encode(credentials));
@@ -132,8 +121,7 @@ impl NextcloudClient {
                 .send()?;
 
             if poll_resp.status().is_success() {
-                let mut auth_data: AuthData = poll_resp.json()?;
-                auth_data.server_url = Some(server_url.to_string());
+                let auth_data: AuthData = poll_resp.json()?;
                 info!("Authentication successful!");
                 return Ok(auth_data);
             }

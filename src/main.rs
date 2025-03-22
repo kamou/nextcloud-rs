@@ -7,6 +7,23 @@ use client::{AuthData, NextcloudClient};
 use std::{fs, io};
 
 use log::{error, info};
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Serialize, Deserialize)]
+struct AppConfig {
+    url: String,
+}
+
+impl Default for AppConfig {
+    fn default() -> Self {
+        println!("Enter your Nextcloud server URL:");
+        let mut input = String::new();
+        io::stdin().read_line(&mut input).ok(); // meh, can theoretically fail
+        let url = input.trim();
+
+        Self { url: url.into() }
+    }
+}
 
 fn load_auth_data(path: &str) -> Option<AuthData> {
     std::fs::read_to_string(path)
@@ -15,9 +32,6 @@ fn load_auth_data(path: &str) -> Option<AuthData> {
 }
 
 fn save_auth_data(file_path: &str, auth_data: &AuthData) -> Result<(), NcError> {
-    if auth_data.server_url().is_none() {
-        return Err(NcError::MissingField("server_url".into()));
-    }
     let contents = serde_json::to_string_pretty(auth_data)?;
     fs::write(file_path, contents)?;
     Ok(())
@@ -26,7 +40,14 @@ fn save_auth_data(file_path: &str, auth_data: &AuthData) -> Result<(), NcError> 
 fn main() -> Result<(), NcError> {
     env_logger::init();
 
-    let mut client = NextcloudClient::new();
+    let home_dir = dirs::home_dir().ok_or(NcError::MissingHomeDir)?;
+    let conf_path = home_dir.join(".nextcloud-rs/");
+    let config: AppConfig = confy::load(
+        conf_path.to_str().ok_or(NcError::ConfigToStrError())?,
+        "config",
+    )?;
+
+    let mut client = NextcloudClient::new(&config.url);
 
     let mut login_required = true;
     if let Some(auth) = load_auth_data("auth_data.json") {
@@ -40,12 +61,7 @@ fn main() -> Result<(), NcError> {
     }
 
     if login_required {
-        println!("Enter your Nextcloud server URL:");
-        let mut input = String::new();
-        io::stdin().read_line(&mut input)?;
-        let server_url = input.trim();
-
-        let auth_data = client.login(server_url)?;
+        let auth_data = client.login()?;
         save_auth_data("auth_data.json", &auth_data)?;
     }
 
