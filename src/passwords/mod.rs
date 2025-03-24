@@ -106,11 +106,11 @@ impl Passwords {
             return Err(NcError::Generic("Invalid password salt length".into()));
         }
 
-        if generic_hash_key.len() != 64 {
+        if generic_hash_key.len() != generichash::KEY_MAX {
             return Err(NcError::Generic("Invalid generic hash key length".into()));
         }
 
-        if password_hash_salt.len() != 16 {
+        if password_hash_salt.len() != argon2id13::SALTBYTES {
             return Err(NcError::Generic("Invalid password hash salt length".into()));
         }
 
