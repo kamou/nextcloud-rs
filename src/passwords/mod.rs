@@ -3,18 +3,51 @@ use crate::client::NextcloudClient;
 use crate::errors::NcError;
 use crate::passwords::session::{SessionOpen, SessionRequest};
 use reqwest::header::{HeaderMap, HeaderName};
+use serde::{Deserialize, Serialize};
 use sodiumoxide::crypto::generichash;
 use sodiumoxide::crypto::pwhash::argon2id13;
+use sodiumoxide::crypto::secretbox;
 use std::collections::HashMap;
+#[derive(Serialize, Deserialize, Debug)]
+pub struct KeyChain {
+    keys: HashMap<String, String>,
+    current: String,
+}
 
 pub struct Passwords {
     client: NextcloudClient,
+    keychain: Option<KeyChain>,
+}
+
+fn decrypt_keychain(master_password: String, keychain: Vec<u8>) -> Result<KeyChain, NcError> {
+    let salt = &keychain[0..argon2id13::SALTBYTES];
+    let payload = &keychain[argon2id13::SALTBYTES..];
+    let mut derived_key = [0u8; secretbox::KEYBYTES];
+
+    let argon_salt = argon2id13::Salt::from_slice(salt).unwrap();
+    argon2id13::derive_key(
+        &mut derived_key,
+        master_password.as_bytes(),
+        &argon_salt,
+        argon2id13::OPSLIMIT_INTERACTIVE,
+        argon2id13::MEMLIMIT_INTERACTIVE,
+    )
+    .map_err(|_| NcError::Generic("Failed to derive key".into()))?;
+
+    let nonce = secretbox::Nonce::from_slice(&payload[0..secretbox::NONCEBYTES]).unwrap();
+    let cipher_text = &payload[secretbox::NONCEBYTES..];
+    let key = secretbox::Key::from_slice(&derived_key).unwrap();
+    let decrypted_json_bytes =
+        secretbox::open(cipher_text, &nonce, &key).expect("Failed to decrypt cipher text");
+    let keychain_json = String::from_utf8(decrypted_json_bytes).unwrap();
+    Ok(serde_json::from_str(&keychain_json)?)
 }
 
 impl Passwords {
     pub fn new(client: &NextcloudClient) -> Passwords {
         Passwords {
             client: client.clone(),
+            keychain: None,
         }
     }
 
@@ -29,12 +62,15 @@ impl Passwords {
         }
 
         let challenge_response = self
-            .solve_pwdv1_challenge(master_password, &challenge_data.challenge.unwrap().salts)
+            .solve_pwdv1_challenge(
+                master_password.clone(),
+                &challenge_data.challenge.unwrap().salts,
+            )
             .await?;
 
         let mut form = HashMap::new();
         form.insert("challenge", challenge_response);
-        let (_, headers): (SessionOpen, HeaderMap) =
+        let (session, headers): (SessionOpen, HeaderMap) =
             self.client.request_with_headers(Some(form)).await?;
 
         let api_session = headers
@@ -42,6 +78,9 @@ impl Passwords {
             .ok_or(NcError::MissingField("X-API-SESSION header".into()))?
             .to_str()?
             .to_owned();
+
+        let keychain = hex::decode(session.keys.unwrap().get("CSEv1r1").unwrap())?;
+        self.keychain = Some(decrypt_keychain(master_password, keychain)?);
 
         self.client
             .add_header("X-API-SESSION".parse::<HeaderName>()?, api_session.clone())

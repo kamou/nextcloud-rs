@@ -34,9 +34,9 @@ pub struct Token {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct SessionOpen {
-    success: bool,
+    pub success: bool,
     #[serde(default)]
-    keys: Option<HashMap<String, String>>,
+    pub keys: Option<HashMap<String, String>>,
 }
 
 impl EndpointInfo for SessionOpen {
