@@ -19,6 +19,51 @@ pub struct Passwords {
     keychain: Option<KeyChain>,
 }
 
+fn solve_pwdv1_challenge(master_password: String, challenge: &[String]) -> Result<String, NcError> {
+    if challenge.len() != 3 {
+        return Err(NcError::Generic("Invalid challenge".into()));
+    }
+
+    let password_salt = hex::decode(&challenge[0])?;
+    let generic_hash_key = hex::decode(&challenge[1])?;
+    let password_hash_salt = hex::decode(&challenge[2])?;
+
+    if password_salt.len() != 256 {
+        return Err(NcError::Generic("Invalid password salt length".into()));
+    }
+
+    if generic_hash_key.len() != generichash::KEY_MAX {
+        return Err(NcError::Generic("Invalid generic hash key length".into()));
+    }
+
+    if password_hash_salt.len() != argon2id13::SALTBYTES {
+        return Err(NcError::Generic("Invalid password hash salt length".into()));
+    }
+
+    let mut message = Vec::from(master_password.as_bytes());
+    message.extend_from_slice(&password_salt);
+
+    let generic_hash = generichash::hash(
+        &message,
+        Some(generichash::DIGEST_MAX),
+        Some(&generic_hash_key),
+    )
+    .map_err(|_| NcError::Generic("Generic hash failed".into()))?;
+
+    let mut derived_key = [0u8; 32];
+    let argon_salt = argon2id13::Salt::from_slice(&password_hash_salt)
+        .ok_or(NcError::Generic("Invalid salt2".into()))?;
+
+    argon2id13::derive_key(
+        &mut derived_key,
+        generic_hash.as_ref(),
+        &argon_salt,
+        argon2id13::OPSLIMIT_INTERACTIVE,
+        argon2id13::MEMLIMIT_INTERACTIVE,
+    )
+    .map_err(|_| NcError::Generic("Argon2id key derivation failed".into()))?;
+    Ok(hex::encode(derived_key))
+}
 fn decrypt_keychain(master_password: String, keychain: Vec<u8>) -> Result<KeyChain, NcError> {
     let salt = &keychain[0..argon2id13::SALTBYTES];
     let payload = &keychain[argon2id13::SALTBYTES..];
@@ -61,12 +106,10 @@ impl Passwords {
             return Err(NcError::Generic("2FA not supported yet".into()));
         }
 
-        let challenge_response = self
-            .solve_pwdv1_challenge(
-                master_password.clone(),
-                &challenge_data.challenge.unwrap().salts,
-            )
-            .await?;
+        let challenge_response = solve_pwdv1_challenge(
+            master_password.clone(),
+            &challenge_data.challenge.unwrap().salts,
+        )?;
 
         let mut form = HashMap::new();
         form.insert("challenge", challenge_response);
@@ -89,53 +132,4 @@ impl Passwords {
         Ok(())
     }
 
-    async fn solve_pwdv1_challenge(
-        &self,
-        master_password: String,
-        challenge: &[String],
-    ) -> Result<String, NcError> {
-        if challenge.len() != 3 {
-            return Err(NcError::Generic("Invalid challenge".into()));
-        }
-
-        let password_salt = hex::decode(&challenge[0])?;
-        let generic_hash_key = hex::decode(&challenge[1])?;
-        let password_hash_salt = hex::decode(&challenge[2])?;
-
-        if password_salt.len() != 256 {
-            return Err(NcError::Generic("Invalid password salt length".into()));
-        }
-
-        if generic_hash_key.len() != generichash::KEY_MAX {
-            return Err(NcError::Generic("Invalid generic hash key length".into()));
-        }
-
-        if password_hash_salt.len() != argon2id13::SALTBYTES {
-            return Err(NcError::Generic("Invalid password hash salt length".into()));
-        }
-
-        let mut message = Vec::from(master_password.as_bytes());
-        message.extend_from_slice(&password_salt);
-
-        let generic_hash = generichash::hash(
-            &message,
-            Some(generichash::DIGEST_MAX),
-            Some(&generic_hash_key),
-        )
-        .map_err(|_| NcError::Generic("Generic hash failed".into()))?;
-
-        let mut derived_key = [0u8; 32];
-        let argon_salt = argon2id13::Salt::from_slice(&password_hash_salt)
-            .ok_or(NcError::Generic("Invalid salt2".into()))?;
-
-        argon2id13::derive_key(
-            &mut derived_key,
-            generic_hash.as_ref(),
-            &argon_salt,
-            argon2id13::OPSLIMIT_INTERACTIVE,
-            argon2id13::MEMLIMIT_INTERACTIVE,
-        )
-        .map_err(|_| NcError::Generic("Argon2id key derivation failed".into()))?;
-        Ok(hex::encode(derived_key))
-    }
 }
