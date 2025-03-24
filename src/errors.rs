@@ -40,7 +40,21 @@ pub enum NcError {
     #[error("Could not find home directory")]
     MissingHomeDir,
 
-    // confy errors
     #[error("Configuration error: {0}")]
     Confy(#[from] confy::ConfyError),
+
+    #[error("Authentication TimedOut")]
+    TimedOut,
+
+    #[error("Bad URL: {0}")]
+    BadUrl(String),
+
+    #[error("Invalid URL: {0}")]
+    InvalidUrl(#[from] url::ParseError),
+
+    #[error("Receiver error: {0}")]
+    ReceiverError(#[from] tokio::sync::watch::error::RecvError),
+
+    #[error("Application not authenticated")]
+    NotAuthenticated,
 }
