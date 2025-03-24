@@ -1,3 +1,4 @@
+use crate::client::AuthData;
 use confy;
 use reqwest::header::InvalidHeaderName;
 use thiserror::Error;
@@ -57,4 +58,13 @@ pub enum NcError {
 
     #[error("Application not authenticated")]
     NotAuthenticated,
+
+    #[error("Hex decoding error: {0}")]
+    HexDecodeError(#[from] hex::FromHexError),
+
+    #[error("Generic error: {0}")]
+    Generic(String),
+
+    #[error("Authentication SendError: {0}")]
+    SendError(#[from] tokio::sync::watch::error::SendError<std::option::Option<AuthData>>),
 }

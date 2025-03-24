@@ -1,9 +1,11 @@
 use crate::errors::NcError;
 
 use crate::endpoint::{Endpoint, EndpointInfo};
+use reqwest::header::HeaderName;
 use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderValue};
 use reqwest::{Client, Method};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use tokio::sync::watch;
 use tokio::sync::watch::Sender;
 use tokio::time::{Duration, sleep};
@@ -16,6 +18,12 @@ pub struct AuthData {
 
     #[serde(rename = "appPassword")]
     app_password: String,
+}
+
+impl AuthData {
+    pub fn get_login_name(&self) -> &str {
+        &self.login_name
+    }
 }
 
 #[derive(Clone, Deserialize, Debug)]
@@ -86,6 +94,7 @@ pub struct NextcloudClient {
     auth_data_tx: watch::Sender<Option<AuthData>>,
     auth_data_rx: watch::Receiver<Option<AuthData>>,
     auth_in_progress: bool,
+    extra_headers: HeaderMap,
 }
 
 async fn poll_authentication(
@@ -119,10 +128,28 @@ impl NextcloudClient {
             auth_data_tx,
             auth_data_rx,
             auth_in_progress: false,
+            extra_headers: HeaderMap::new(),
         }
     }
 
-    pub async fn request<T>(&mut self, data: Option<String>) -> Result<T, NcError>
+    pub async fn add_header(&mut self, name: HeaderName, value: String) -> Result<(), NcError> {
+        self.extra_headers
+            .insert(name, HeaderValue::from_str(&value)?);
+        Ok(())
+    }
+
+    pub async fn request<T>(&mut self, data: Option<HashMap<&str, String>>) -> Result<T, NcError>
+    where
+        T: for<'de> Deserialize<'de> + EndpointInfo + Send,
+    {
+        let (obj, _) = self.request_with_headers(data).await?;
+        Ok(obj)
+    }
+
+    pub async fn request_with_headers<T>(
+        &mut self,
+        data: Option<HashMap<&str, String>>,
+    ) -> Result<(T, HeaderMap), NcError>
     where
         T: for<'de> Deserialize<'de> + EndpointInfo + Send,
     {
@@ -134,9 +161,7 @@ impl NextcloudClient {
                 .await?;
             let auth_data = self.auth_data_rx.borrow().clone().unwrap();
             let credentials = format!("{}:{}", auth_data.login_name, auth_data.app_password);
-            let auth_str = format!("Basic {}", base64::encode(credentials))
-                .parse()
-                .unwrap();
+            let auth_str = format!("Basic {}", base64::encode(credentials)).parse()?;
             headers.insert(AUTHORIZATION, auth_str);
         }
 
@@ -144,14 +169,17 @@ impl NextcloudClient {
             headers.insert("OCS-APIRequest", HeaderValue::from_static("true"));
         }
 
-        let base = Url::parse(self.server_url()).unwrap();
-        let url = base.join(&ep.path).unwrap().to_string();
+        headers.extend(self.extra_headers.clone());
+
+        let base = Url::parse(self.server_url())?;
+        let url = base.join(&ep.path)?.to_string();
         let mut req_builder = self.client.request(ep.method, url).headers(headers);
         if let Some(body) = data {
-            req_builder = req_builder.body(body);
+            req_builder = req_builder.form(&body);
         }
 
         let response = req_builder.send().await?;
+        let headers = response.headers().clone();
 
         if !response.status().is_success() {
             let status = response.status().as_u16();
@@ -162,7 +190,7 @@ impl NextcloudClient {
             return Err(NcError::UnexpectedResponse { status, body });
         }
 
-        Ok(response.json::<T>().await?)
+        Ok((response.json::<T>().await?, headers))
     }
 
     pub fn server_url(&self) -> &str {
@@ -175,9 +203,11 @@ impl NextcloudClient {
     }
 
     pub async fn login_from_auth_data(&mut self, auth_data: &AuthData) -> Result<(), NcError> {
-        self.auth_data_tx.send(Some(auth_data.clone())).unwrap(); // meh
+        self.auth_data_tx.send(Some(auth_data.clone()))?; // meh
         self.verify_credentials().await.inspect_err(|_| {
-            self.auth_data_tx.send(None).unwrap();
+            self.auth_data_tx.send(None).unwrap_or_else(|e| {
+                eprintln!("Failed to clear auth data: {:?}", e);
+            });
         })?;
 
         self.auth_in_progress = false;
