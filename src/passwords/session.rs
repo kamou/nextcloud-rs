@@ -331,7 +331,7 @@ impl Session {
         }
     }
 
-    pub async fn session_open(&mut self, master_password: SecretString) -> Result<(), NcError> {
+    pub async fn open(&mut self, master_password: SecretString) -> Result<(), NcError> {
         self.master_password = Some(master_password);
 
         let challenge_data: SessionRequest = self.client.request(None).await?;
@@ -377,18 +377,16 @@ impl Session {
         Ok(())
     }
 
-    pub async fn session_close(&mut self) {
+    pub async fn close(&mut self) {
         self.enc_keychain = None;
         self.master_password = None;
     }
 
-    pub async fn get_encrypted_pobjects(
-        &mut self,
-    ) -> Result<Vec<EncryptedPasswordObject>, NcError> {
+    pub async fn get_passwords(&mut self) -> Result<Vec<EncryptedPasswordObject>, NcError> {
         self.client.request(None).await
     }
 
-    pub fn decrypt_pobject_field(
+    pub fn decrypt_field(
         &self,
         object: &EncryptedPasswordObject,
         field: EncryptedField,

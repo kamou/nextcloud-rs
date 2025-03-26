@@ -39,7 +39,7 @@ async fn main() -> Result<(), NcError> {
             continue;
         }
 
-        match passwords.session_open(input).await {
+        match passwords.open(input).await {
             Ok(mp) => break mp,
             Err(NcError::UnexpectedResponse { status: 401, .. }) => {
                 error!("Invalid password, please try again.");

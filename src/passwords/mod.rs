@@ -41,11 +41,11 @@ impl Passwords {
         }
     }
 
-    pub async fn session_open(&mut self, master_password: SecretString) -> Result<(), NcError> {
-        self.session.session_open(master_password).await?;
+    pub async fn open(&mut self, master_password: SecretString) -> Result<(), NcError> {
+        self.session.open(master_password).await?;
         self.cache = self
             .session
-            .get_encrypted_pobjects()
+            .get_passwords()
             .await?
             .iter()
             .map(|o| Password::new(self.session.clone(), o.clone()))
@@ -54,7 +54,7 @@ impl Passwords {
     }
 
     pub async fn session_close(&mut self) {
-        self.session.session_close().await;
+        self.session.close().await;
     }
 
     pub async fn get_passwords(&self) -> Result<Vec<&Password>, NcError> {

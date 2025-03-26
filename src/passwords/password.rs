@@ -19,33 +19,33 @@ impl Password {
 
     pub fn label(&self) -> Result<SecretString, NcError> {
         self.session
-            .decrypt_pobject_field(&self.encrypted, EncryptedField::Label)
+            .decrypt_field(&self.encrypted, EncryptedField::Label)
     }
 
     pub fn username(&self) -> Result<SecretString, NcError> {
         self.session
-            .decrypt_pobject_field(&self.encrypted, EncryptedField::Username)
+            .decrypt_field(&self.encrypted, EncryptedField::Username)
     }
 
     pub fn password(&self) -> Result<SecretString, NcError> {
         self.session
-            .decrypt_pobject_field(&self.encrypted, EncryptedField::Password)
+            .decrypt_field(&self.encrypted, EncryptedField::Password)
     }
 
     pub fn url(&self) -> Result<SecretString, NcError> {
         self.session
-            .decrypt_pobject_field(&self.encrypted, EncryptedField::Url)
+            .decrypt_field(&self.encrypted, EncryptedField::Url)
     }
 
     pub fn notes(&self) -> Result<SecretString, NcError> {
         self.session
-            .decrypt_pobject_field(&self.encrypted, EncryptedField::Notes)
+            .decrypt_field(&self.encrypted, EncryptedField::Notes)
     }
 
     pub fn custom_fields(&self) -> Result<HashMap<String, SecretString>, NcError> {
         let json_str = self
             .session
-            .decrypt_pobject_field(&self.encrypted, EncryptedField::CustomFields)?;
+            .decrypt_field(&self.encrypted, EncryptedField::CustomFields)?;
         Ok(serde_json::from_str(json_str.expose_secret())?)
     }
 
