@@ -4,7 +4,7 @@ use secrecy::{ExposeSecret, SecretString};
 use std::collections::HashMap;
 
 pub struct Password {
-    session: Session, // TODO: rename Passwords -> Session
+    session: Session,
     encrypted: EncryptedPasswordObject,
 }
 
