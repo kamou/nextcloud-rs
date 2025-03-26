@@ -67,4 +67,7 @@ pub enum NcError {
 
     #[error("Authentication SendError: {0}")]
     SendError(#[from] tokio::sync::watch::error::SendError<std::option::Option<AuthData>>),
+
+    #[error("Error converting string from utf8: {0}")]
+    FromUtf8Error(#[from] std::string::FromUtf8Error),
 }

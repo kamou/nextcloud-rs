@@ -1,33 +1,13 @@
 mod common;
-use common::{AppConfig, authenticate};
-use keyring::{Entry, Error as KeyringError};
+use common::{AppConfig, authenticate, secure_println};
 use nextcloud_rs::client::NextcloudClient;
+use secrecy::{ExposeSecret, SecretString};
+use std::io::Write;
 
-use dialoguer::Password;
+use log::error;
 use nextcloud_rs::errors::NcError;
 use nextcloud_rs::passwords::Passwords;
-
-async fn get_master_password(username: &str) -> Result<String, NcError> {
-    let service = "nextcloud_passwords";
-    let entry = Entry::new(service, username).map_err(|e| NcError::Generic(e.to_string()))?;
-
-    match entry.get_password() {
-        Ok(password) => Ok(password),
-        Err(KeyringError::NoEntry) => {
-            let password = Password::new()
-                .with_prompt("Enter your Nextcloud Passwords app master password")
-                .interact()
-                .map_err(|e| NcError::Generic(format!("Password input error: {}", e)))?;
-
-            entry
-                .set_password(&password)
-                .map_err(|e| NcError::Generic(format!("Failed to save password: {}", e)))?;
-
-            Ok(password)
-        }
-        Err(e) => Err(NcError::Generic(format!("Keyring error: {}", e))),
-    }
-}
+use rpassword::read_password;
 
 #[tokio::main]
 async fn main() -> Result<(), NcError> {
@@ -43,13 +23,43 @@ async fn main() -> Result<(), NcError> {
     let mut client = NextcloudClient::new(&config.url);
     authenticate(&mut client).await?;
 
-    let mut passwords_session = Passwords::new(&client);
-    let auth_data = client.get_auth_data().await.unwrap();
+    let mut passwords = Passwords::new(&client);
 
-    let username = auth_data.get_login_name();
-    let master_password = get_master_password(username).await?;
+    loop {
+        print!("Please enter your Nextcloud Passwords app master password: ");
+        std::io::stdout().flush().unwrap();
+        let input = SecretString::new(
+            read_password()
+                .map_err(|e| NcError::Generic(format!("Password input error: {}", e)))?
+                .into(),
+        );
 
-    passwords_session.session_open(master_password).await?;
+        if input.expose_secret().is_empty() {
+            error!("Password cannot be empty.");
+            continue;
+        }
+
+        match passwords.session_open(input).await {
+            Ok(mp) => break mp,
+            Err(NcError::UnexpectedResponse { status: 401, .. }) => {
+                error!("Invalid password, please try again.");
+                continue;
+            }
+
+            Err(NcError::UnexpectedResponse { status: 403, .. }) => {
+                error!("Too many failed attempts, app password have been revoked.");
+                return Ok(());
+            }
+            Err(e) => return Err(e),
+        }
+    }
+
     println!("Passowrd session opened successfully.");
+
+    let passwords = passwords.get_passwords().await?;
+    for password in passwords {
+        secure_println(&password.password()?)?;
+    }
+
     Ok(())
 }

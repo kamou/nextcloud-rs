@@ -1,7 +1,9 @@
+use libc::{STDOUT_FILENO, write};
 use log::{error, info};
 use nextcloud_rs::client::AuthData;
 use nextcloud_rs::client::NextcloudClient;
 use nextcloud_rs::errors::NcError;
+use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 use std::io::Write;
 use std::time::Duration;
@@ -79,4 +81,29 @@ pub fn save_auth_data(file_path: &str, auth_data: &AuthData) -> Result<(), NcErr
     let contents = serde_json::to_string_pretty(auth_data)?;
     fs::write(file_path, contents)?;
     Ok(())
+}
+
+// does not copy the password to the heap
+#[allow(dead_code)]
+pub fn secure_println(secret: &SecretString) -> std::io::Result<()> {
+    let password_bytes = secret.expose_secret().as_bytes();
+
+    unsafe {
+        let ret = write(
+            STDOUT_FILENO,
+            password_bytes.as_ptr() as *const _,
+            password_bytes.len(),
+        );
+        if ret == -1 {
+            return Err(std::io::Error::last_os_error());
+        }
+
+        // print newline
+        let ret = write(STDOUT_FILENO, b"\n".as_ptr() as *const _, 1);
+        if ret == -1 {
+            Err(std::io::Error::last_os_error())
+        } else {
+            Ok(())
+        }
+    }
 }

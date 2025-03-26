@@ -1,5 +1,6 @@
 use reqwest::Method;
 
+#[derive(Debug)]
 pub struct Endpoint {
     pub path: String,
     pub require_auth: bool,

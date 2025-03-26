@@ -1,6 +1,7 @@
-use crate::errors::NcError;
-
 use crate::endpoint::{Endpoint, EndpointInfo};
+use crate::errors::NcError;
+use base64::{Engine as _, engine::general_purpose};
+use log::debug;
 use reqwest::header::HeaderName;
 use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderValue};
 use reqwest::{Client, Method};
@@ -138,7 +139,7 @@ impl NextcloudClient {
         Ok(())
     }
 
-    pub async fn request<T>(&mut self, data: Option<HashMap<&str, String>>) -> Result<T, NcError>
+    pub async fn request<T>(&mut self, data: Option<HashMap<&str, &str>>) -> Result<T, NcError>
     where
         T: for<'de> Deserialize<'de> + EndpointInfo + Send,
     {
@@ -148,20 +149,22 @@ impl NextcloudClient {
 
     pub async fn request_with_headers<T>(
         &mut self,
-        data: Option<HashMap<&str, String>>,
+        data: Option<HashMap<&str, &str>>,
     ) -> Result<(T, HeaderMap), NcError>
     where
         T: for<'de> Deserialize<'de> + EndpointInfo + Send,
     {
         let ep = T::get_info();
         let mut headers = HeaderMap::new();
+        debug!("requesting: {:?}", ep);
 
         if ep.require_auth {
             self.wait_for_authentication(Duration::from_secs(60))
                 .await?;
             let auth_data = self.auth_data_rx.borrow().clone().unwrap();
             let credentials = format!("{}:{}", auth_data.login_name, auth_data.app_password);
-            let auth_str = format!("Basic {}", base64::encode(credentials)).parse()?;
+            let auth_str =
+                format!("Basic {}", general_purpose::STANDARD.encode(credentials)).parse()?;
             headers.insert(AUTHORIZATION, auth_str);
         }
 
@@ -175,6 +178,10 @@ impl NextcloudClient {
         let url = base.join(&ep.path)?.to_string();
         let mut req_builder = self.client.request(ep.method, url).headers(headers);
         if let Some(body) = data {
+            let body: HashMap<&str, &str> = body
+                .iter()
+                .map(|(k, v)| (*k, *v))
+                .collect::<HashMap<&str, &str>>();
             req_builder = req_builder.form(&body);
         }
 
