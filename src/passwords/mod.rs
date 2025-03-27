@@ -60,4 +60,11 @@ impl Passwords {
     pub async fn get_passwords(&self) -> Result<Vec<&Password>, NcError> {
         Ok(self.cache.iter().collect())
     }
+
+    pub async fn get_password(&self, id: &str) -> Result<&Password, NcError> {
+        self.cache
+            .iter()
+            .find(|p| p.id() == id)
+            .ok_or_else(|| NcError::PasswordNotFound(id.to_string()))
+    }
 }

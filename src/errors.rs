@@ -70,4 +70,7 @@ pub enum NcError {
 
     #[error("Error converting string from utf8: {0}")]
     FromUtf8Error(#[from] std::string::FromUtf8Error),
+
+    #[error("Password with id {0} not found")]
+    PasswordNotFound(String),
 }
