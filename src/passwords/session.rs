@@ -152,7 +152,7 @@ pub enum EncryptedField {
     CustomFields,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 pub struct KeyChain {
     keys: HashMap<String, SecretString>,
     current: String,
@@ -264,39 +264,6 @@ fn solve_pwdv1_challenge(
     ))
 }
 
-fn decrypt_keychain(master_password: &SecretString, keychain: &[u8]) -> Result<KeyChain, NcError> {
-    let salt = &keychain[0..argon2id13::SALTBYTES];
-    let payload = &keychain[argon2id13::SALTBYTES..];
-    let mut derived_key = SecretBox::new(Box::new([0u8; secretbox::KEYBYTES]));
-
-    let argon_salt = argon2id13::Salt::from_slice(salt).ok_or_else(|| {
-        NcError::Generic("Failed to create argon2id salt from keychain salt".into())
-    })?;
-
-    argon2id13::derive_key(
-        derived_key.expose_secret_mut(),
-        master_password.expose_secret().as_bytes(),
-        &argon_salt,
-        argon2id13::OPSLIMIT_INTERACTIVE,
-        argon2id13::MEMLIMIT_INTERACTIVE,
-    )
-    .map_err(|_| NcError::Generic("Failed to derive key".into()))?;
-
-    let nonce = secretbox::Nonce::from_slice(&payload[0..secretbox::NONCEBYTES])
-        .ok_or_else(|| NcError::Generic("Failed to create nonce from keychain payload".into()))?;
-    let cipher_text = &payload[secretbox::NONCEBYTES..];
-    let key = secretbox::Key::from_slice(derived_key.expose_secret_mut().as_ref())
-        .ok_or_else(|| NcError::Generic("Failed to create key from derived key".into()))?;
-    let decrypted_json_bytes =
-        secretbox::open(cipher_text, &nonce, &key).expect("Failed to decrypt cipher text");
-    let keychain_json_text =
-        SecretString::new(String::from_utf8(decrypted_json_bytes)?.into_boxed_str());
-
-    let keychain_json: KeyChain = serde_json::from_str(keychain_json_text.expose_secret())?;
-
-    Ok(keychain_json)
-}
-
 fn decrypt_field(encrypted_str: &String, key: &secretbox::Key) -> Result<SecretString, NcError> {
     let encrypted_bytes = hex::decode(encrypted_str)?;
     if encrypted_bytes.is_empty() {
@@ -318,22 +285,18 @@ fn decrypt_field(encrypted_str: &String, key: &secretbox::Key) -> Result<SecretS
 #[derive(Clone)]
 pub struct Session {
     client: NextcloudClient,
-    enc_keychain: Option<HashMap<String, SecretString>>,
-    master_password: Option<SecretString>,
+    cse_keychain: Option<KeyChain>,
 }
 
 impl Session {
     pub fn new(client: &NextcloudClient) -> Session {
         Session {
             client: client.clone(),
-            enc_keychain: None,
-            master_password: None,
+            cse_keychain: None,
         }
     }
 
     pub async fn open(&mut self, master_password: SecretString) -> Result<(), NcError> {
-        self.master_password = Some(master_password);
-
         let challenge_data: SessionRequest = self.client.request(None).await?;
         match challenge_data {
             SessionRequest{challenge: Some(_), token: _} => Ok(()),
@@ -342,10 +305,8 @@ impl Session {
 
         }?;
 
-        let challenge_response = solve_pwdv1_challenge(
-            self.master_password.as_ref().unwrap(),
-            &challenge_data.challenge.unwrap().salts,
-        )?;
+        let challenge_response =
+            solve_pwdv1_challenge(&master_password, &challenge_data.challenge.unwrap().salts)?;
 
         let (session, headers): (SessionOpen, HeaderMap) = self
             .client
@@ -361,7 +322,17 @@ impl Session {
             ));
         }
 
-        self.enc_keychain = session.keys;
+        let hex_keychain = session
+            .keys
+            .as_ref()
+            .unwrap()
+            .get("CSEv1r1")
+            .ok_or(NcError::MissingField("No CSEv1r1 keychian found".into()))?
+            .expose_secret();
+
+        let keychain_bytes = hex::decode(hex_keychain)?;
+        self.cse_keychain =
+            Some(self.decrypt_keychain(master_password, keychain_bytes.as_slice())?);
         drop(challenge_response);
 
         let api_session = headers
@@ -378,12 +349,51 @@ impl Session {
     }
 
     pub async fn close(&mut self) {
-        self.enc_keychain = None;
-        self.master_password = None;
+        self.cse_keychain = None;
     }
 
     pub async fn get_passwords(&mut self) -> Result<Vec<EncryptedPasswordObject>, NcError> {
         self.client.request(None).await
+    }
+
+    fn decrypt_keychain(
+        &self,
+        master_password: SecretString,
+        keychain: &[u8],
+    ) -> Result<KeyChain, NcError> {
+        let salt = &keychain[0..argon2id13::SALTBYTES];
+        let payload = &keychain[argon2id13::SALTBYTES..];
+        let mut derived_key = SecretBox::new(Box::new([0u8; secretbox::KEYBYTES]));
+
+        let argon_salt = argon2id13::Salt::from_slice(salt).ok_or_else(|| {
+            NcError::Generic("Failed to create argon2id salt from keychain salt".into())
+        })?;
+
+        argon2id13::derive_key(
+            derived_key.expose_secret_mut(),
+            master_password.expose_secret().as_bytes(),
+            &argon_salt,
+            argon2id13::OPSLIMIT_INTERACTIVE,
+            argon2id13::MEMLIMIT_INTERACTIVE,
+        )
+        .map_err(|_| NcError::Generic("Failed to derive key".into()))?;
+        drop(master_password);
+
+        let nonce =
+            secretbox::Nonce::from_slice(&payload[0..secretbox::NONCEBYTES]).ok_or_else(|| {
+                NcError::Generic("Failed to create nonce from keychain payload".into())
+            })?;
+        let cipher_text = &payload[secretbox::NONCEBYTES..];
+        let key = secretbox::Key::from_slice(derived_key.expose_secret_mut().as_ref())
+            .ok_or_else(|| NcError::Generic("Failed to create key from derived key".into()))?;
+        let decrypted_json_bytes =
+            secretbox::open(cipher_text, &nonce, &key).expect("Failed to decrypt cipher text");
+        let keychain_json_text =
+            SecretString::new(String::from_utf8(decrypted_json_bytes)?.into_boxed_str());
+
+        let keychain_json: KeyChain = serde_json::from_str(keychain_json_text.expose_secret())?;
+
+        Ok(keychain_json)
     }
 
     pub fn decrypt_field(
@@ -391,24 +401,11 @@ impl Session {
         object: &EncryptedPasswordObject,
         field: EncryptedField,
     ) -> Result<SecretString, NcError> {
-        let cse_type = &object.cse_type;
-        let hex_keychain = self
-            .enc_keychain
+        let key_id = self.cse_keychain.as_ref().unwrap().current.clone();
+        let key_str = self
+            .cse_keychain
             .as_ref()
             .unwrap()
-            .get(cse_type)
-            .unwrap()
-            .expose_secret();
-
-        let keychain_bytes = hex::decode(hex_keychain)?;
-        let keychain = decrypt_keychain(
-            self.master_password.as_ref().unwrap(),
-            keychain_bytes.as_slice(),
-        )?;
-        drop(keychain_bytes);
-
-        let key_id = keychain.current;
-        let key_str = keychain
             .keys
             .get(&key_id)
             .ok_or_else(|| NcError::Generic("Current key ID not found in keychain".into()))?;
