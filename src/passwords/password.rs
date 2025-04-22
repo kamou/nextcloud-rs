@@ -1,6 +1,6 @@
 use crate::endpoint::{Endpoint, EndpointInfo};
 use crate::errors::NcError;
-use crate::passwords::fields::{ClearField, EncryptedField, EncryptedJson, FieldAccess};
+use crate::passwords::fields::{ClearField, EncryptedField, EncryptedJson};
 use crate::passwords::session::Session;
 use reqwest::Method;
 use serde::{Deserialize, Serialize};
