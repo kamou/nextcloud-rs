@@ -1,9 +1,15 @@
-use crate::errors::NcError;
-use crate::passwords::session::Session;
 use secrecy::ExposeSecret;
 use serde::{Deserialize, Serialize};
 
+use crate::errors::NcError;
+use crate::passwords::session::Session;
+
 pub trait EncryptedJson {}
+pub trait FieldAccess<T> {
+    fn get(&self) -> Result<T, NcError>;
+    fn set(&mut self, value: T) -> Result<(), NcError>;
+}
+
 #[derive(Clone, Serialize)]
 pub struct EncryptedField<T> {
     encrypted_data: String,
@@ -34,15 +40,30 @@ where
         self.session = Some(session);
     }
 
-    pub fn get(&self) -> Result<T, NcError> {
-        let session = self.session.as_ref().unwrap();
-        let decrypted_json = session.decrypt(&self.encrypted_data)?; // Adjust for your real API
+    pub fn get_session(&self) -> Option<&Session> {
+        self.session.as_ref()
+    }
+}
+
+impl<T> FieldAccess<T> for EncryptedField<T>
+where
+    T: for<'de> serde::Deserialize<'de> + serde::Serialize + EncryptedJson,
+{
+    fn get(&self) -> Result<T, NcError> {
+        let session = self
+            .session
+            .as_ref()
+            .ok_or_else(|| NcError::SessionUnavailable)?;
+        let decrypted_json = session.decrypt(&self.encrypted_data)?;
         let exposed_secret = decrypted_json.expose_secret();
-        Ok(serde_json::from_str(exposed_secret)?) // this fails because the decrypted string is not
+        Ok(serde_json::from_str(exposed_secret)?)
     }
 
-    pub fn set(&mut self, value: T) -> Result<(), NcError> {
-        let session = self.session.as_ref().unwrap();
+    fn set(&mut self, value: T) -> Result<(), NcError> {
+        let session = self
+            .session
+            .as_ref()
+            .ok_or_else(|| NcError::SessionUnavailable)?;
         let json = serde_json::to_string(&value)?;
         let encrypted_data = session.encrypt(json.as_str())?;
         self.encrypted_data = encrypted_data;
@@ -54,15 +75,20 @@ impl EncryptedField<String> {
     pub fn inject_session(&mut self, session: Session) {
         self.session = Some(session);
     }
-    pub fn get(&self) -> Result<String, NcError> {
-        self.session
+}
+
+impl FieldAccess<String> for EncryptedField<String> {
+    fn get(&self) -> Result<String, NcError> {
+        let session = self
+            .session
             .as_ref()
-            .ok_or_else(|| NcError::SessionUnavailable)?
-            .decrypt(&self.encrypted_data)
-            .map(|secret| secret.expose_secret().to_string())
+            .ok_or_else(|| NcError::SessionUnavailable)?;
+        let decrypted_json = session.decrypt(&self.encrypted_data)?;
+        let exposed_secret = decrypted_json.expose_secret();
+        Ok(exposed_secret.to_string())
     }
 
-    pub fn set(&mut self, value: String) -> Result<(), NcError> {
+    fn set(&mut self, value: String) -> Result<(), NcError> {
         let session = self
             .session
             .as_ref()
@@ -75,12 +101,16 @@ impl EncryptedField<String> {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct ClearField<T>(pub T);
-impl<T> ClearField<T> {
-    pub fn get(&self) -> &T {
-        &self.0
+impl<T> FieldAccess<T> for ClearField<T>
+where
+    T: for<'de> serde::Deserialize<'de> + serde::Serialize + Copy,
+{
+    fn get(&self) -> Result<T, NcError> {
+        Ok(self.0)
     }
 
-    pub fn set(&mut self, value: T) {
+    fn set(&mut self, value: T) -> Result<(), NcError> {
         self.0 = value;
+        Ok(())
     }
 }

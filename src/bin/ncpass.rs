@@ -1,4 +1,5 @@
 mod common;
+
 use clap::{Arg, Command, arg};
 use common::{AppConfig, authenticate, println_secret};
 use log::error;
@@ -8,6 +9,7 @@ use std::io::Write;
 
 use nextcloud_rs::client::NextcloudClient;
 use nextcloud_rs::errors::NcError;
+use nextcloud_rs::passwords::fields::FieldAccess;
 use nextcloud_rs::passwords::password::Password;
 use nextcloud_rs::passwords::store::PasswordStore;
 
