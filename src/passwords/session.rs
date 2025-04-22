@@ -156,7 +156,7 @@ pub struct Session {
 }
 
 impl Session {
-    pub fn new(client: &NextcloudClient) -> Session {
+    pub fn new(client: NextcloudClient) -> Session {
         Session {
             client: client.clone(),
             cse_keychain: None,

@@ -1,5 +1,5 @@
 use secrecy::ExposeSecret;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 use crate::errors::NcError;
 use crate::passwords::session::Session;
@@ -10,10 +10,9 @@ pub trait FieldAccess<T> {
     fn set(&mut self, value: T) -> Result<(), NcError>;
 }
 
-#[derive(Clone, Serialize)]
+#[derive(Clone)]
 pub struct EncryptedField<T> {
     encrypted_data: String,
-    #[serde(skip)]
     session: Option<Session>,
     _phantom: std::marker::PhantomData<T>,
 }
@@ -34,7 +33,7 @@ impl<'de, T> serde::Deserialize<'de> for EncryptedField<T> {
 
 impl<T> EncryptedField<T>
 where
-    T: for<'de> serde::Deserialize<'de> + serde::Serialize + EncryptedJson,
+    T: for<'de> serde::Deserialize<'de> + EncryptedJson,
 {
     pub fn inject_session(&mut self, session: Session) {
         self.session = Some(session);
@@ -42,6 +41,10 @@ where
 
     pub fn get_session(&self) -> Option<&Session> {
         self.session.as_ref()
+    }
+
+    pub fn get_encrypted_data(&self) -> &String {
+        &self.encrypted_data
     }
 }
 
@@ -75,6 +78,9 @@ impl EncryptedField<String> {
     pub fn inject_session(&mut self, session: Session) {
         self.session = Some(session);
     }
+    pub fn get_encrypted_data(&self) -> &String {
+        &self.encrypted_data
+    }
 }
 
 impl FieldAccess<String> for EncryptedField<String> {
@@ -99,18 +105,31 @@ impl FieldAccess<String> for EncryptedField<String> {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
-pub struct ClearField<T>(pub T);
+#[derive(Clone)]
+pub struct ClearField<T> {
+    pub value: T,
+}
+
+impl<'de, T: Deserialize<'de>> serde::Deserialize<'de> for ClearField<T> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = T::deserialize(deserializer)?;
+        Ok(ClearField { value })
+    }
+}
+
 impl<T> FieldAccess<T> for ClearField<T>
 where
-    T: for<'de> serde::Deserialize<'de> + serde::Serialize + Copy,
+    T: for<'de> serde::Deserialize<'de> + Copy,
 {
     fn get(&self) -> Result<T, NcError> {
-        Ok(self.0)
+        Ok(self.value)
     }
 
     fn set(&mut self, value: T) -> Result<(), NcError> {
-        self.0 = value;
+        self.value = value;
         Ok(())
     }
 }

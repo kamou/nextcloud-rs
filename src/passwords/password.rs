@@ -1,7 +1,11 @@
 use crate::endpoint::{Endpoint, EndpointInfo};
-use crate::passwords::fields::{ClearField, EncryptedField, EncryptedJson};
+use crate::errors::NcError;
+use crate::passwords::fields::{ClearField, EncryptedField, EncryptedJson, FieldAccess};
+use crate::passwords::session::Session;
 use reqwest::Method;
 use serde::{Deserialize, Serialize};
+// macro json!
+use serde_json::json;
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
 enum CustomFieldType {
@@ -28,8 +32,7 @@ pub struct CustomField {
     value: String,
 }
 
-impl EncryptedJson for CustomField {}
-impl EncryptedJson for Vec<CustomField> {}
+impl EncryptedJson for Option<Vec<CustomField>> {}
 
 #[derive(Serialize, Deserialize, Debug)]
 enum SecurityStatus {
@@ -64,19 +67,21 @@ pub struct Password {
     pub url: EncryptedField<String>,
     pub notes: EncryptedField<String>,
     #[serde(rename = "customFields")]
-    pub custom_fields: Option<EncryptedField<Vec<CustomField>>>,
+    pub custom_fields: EncryptedField<Option<Vec<CustomField>>>,
     pub status: ClearField<u32>,
     #[serde(rename = "statusCode")]
     pub status_code: ClearField<StatusCode>,
     pub hash: ClearField<String>,
     pub folder: ClearField<String>,
     pub revision: ClearField<String>,
-    pub share: Option<ClearField<String>>,
+    pub share: ClearField<Option<String>>,
     pub shared: ClearField<bool>,
     #[serde(rename = "cseType")]
     pub cse_type: ClearField<String>,
+    #[serde(rename = "cseKey")]
+    pub cse_key: ClearField<String>,
     #[serde(rename = "sseType")]
-    pub sse_type: ClearField<String>,
+    pub sse_type: ClearField<Option<String>>,
     pub client: ClearField<String>,
     pub hidden: ClearField<bool>,
     pub trashed: ClearField<bool>,
@@ -84,11 +89,48 @@ pub struct Password {
     pub edited: ClearField<u64>,
     pub created: ClearField<u64>,
     pub updated: ClearField<u64>,
+    #[serde(skip)]
+    pub dirty: bool,
+    #[serde(skip)]
+    pub session: Option<Session>,
 }
 
 impl Password {
     pub fn id(&self) -> String {
-        self.id.0.clone()
+        self.id.value.clone()
+    }
+    pub fn set_dirty(&mut self, dirty: bool) {
+        self.dirty = dirty;
+    }
+
+    pub fn serialize_encrypted(&self) -> Result<String, NcError> {
+        Ok(json!({
+            "id": &self.id.value,
+
+            "label": self.label.get_encrypted_data(),
+            "username": self.username.get_encrypted_data(),
+            "password": self.password.get_encrypted_data(),
+            "url": self.url.get_encrypted_data(),
+            "notes": self.notes.get_encrypted_data(),
+            "customFields": self.custom_fields.get_encrypted_data(),
+            "status": serde_json::to_string(&self.status.value).unwrap(),
+            "statusCode": &self.status_code.value,
+            "hash": &self.hash.value,
+            "folder": &self.folder.value,
+            "revision": &self.revision.value,
+            "share": serde_json::to_string(&self.share.value).unwrap(),
+            "shared": serde_json::to_string(&self.shared.value).unwrap(),
+            "cseType": self.cse_type.value,
+            "cseKey": self.cse_key.value,
+            "client": self.client.value,
+            "hidden": serde_json::to_string(&self.hidden.value).unwrap(),
+            "trashed": serde_json::to_string(&self.trashed.value).unwrap(),
+            "editable": serde_json::to_string(&self.editable.value).unwrap(),
+            "edited": serde_json::to_string(&self.edited.value).unwrap(),
+            "created": serde_json::to_string(&self.created.value).unwrap(),
+            "updated": serde_json::to_string(&self.updated.value).unwrap()
+        })
+        .to_string())
     }
 }
 
@@ -98,6 +140,22 @@ impl EndpointInfo for Vec<Password> {
             path: "index.php/apps/passwords/api/1.0/password/list".into(),
             require_auth: true,
             method: Method::POST,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct UpdatePassword {
+    id: String,
+    revision: String,
+}
+
+impl EndpointInfo for UpdatePassword {
+    fn get_info() -> Endpoint {
+        Endpoint {
+            path: "index.php/apps/passwords/api/1.0/password/update".into(),
+            require_auth: true,
+            method: Method::PATCH,
         }
     }
 }

@@ -22,6 +22,23 @@ fn cli() -> Command {
             .action(clap::ArgAction::SetTrue)
     });
 
+    let set_args = get_fields.iter().map(|&name| {
+        let upper_name = match name {
+            "label" => "LABEL",
+            "username" => "USERNAME",
+            "password" => "PASSWORD",
+            "url" => "URL",
+            "notes" => "NOTES",
+            _ => unreachable!(),
+        };
+
+        Arg::new(name)
+            .long(name)
+            .required(false)
+            .num_args(1)
+            .value_name(upper_name)
+    });
+
     Command::new("passwords")
         .about("A password management tool for Nextcloud Passwords")
         .subcommand_required(true)
@@ -41,6 +58,14 @@ fn cli() -> Command {
                 .arg(arg!(<ID> "the id of the password"))
                 .arg_required_else_help(true)
                 .args(get_args),
+        )
+        .subcommand(
+            // set
+            Command::new("set")
+                .about("Set password details.")
+                .arg(arg!(<ID> "the id of the password"))
+                .arg_required_else_help(true)
+                .args(set_args),
         )
 
     // TODO: other options might be:
@@ -63,7 +88,7 @@ fn load_config() -> Result<AppConfig, NcError> {
     Ok(config)
 }
 
-async fn get_store(client: &mut NextcloudClient) -> Result<PasswordStore, NcError> {
+async fn get_store<'p>(client: NextcloudClient) -> Result<PasswordStore, NcError> {
     let mut store = PasswordStore::new(client);
 
     loop {
@@ -129,13 +154,13 @@ async fn prerequisits() -> Result<(PasswordStore, AppConfig), NcError> {
     let config = load_config()?;
     let mut client = NextcloudClient::new(&config.url);
     authenticate(&mut client).await?;
-    let passwords = get_store(&mut client).await?;
+    let passwords = get_store(client).await?;
     Ok((passwords, config))
 }
 
 async fn list_passwords() -> Result<(), NcError> {
     let (store, _) = prerequisits().await?;
-    for password in &mut store.get_passwords().await? {
+    for password in &mut store.get_passwords().await?.iter() {
         print_password_info(password).await?;
     }
     Ok(())
@@ -144,7 +169,7 @@ async fn list_passwords() -> Result<(), NcError> {
 async fn find_passwords(keyword: &str) -> Result<(), NcError> {
     let (store, _) = prerequisits().await?;
 
-    for password in &store.get_passwords().await? {
+    for password in &mut store.get_passwords().await?.iter() {
         let is_match = password.label.get().unwrap().contains(keyword)
             || password.url.get().unwrap().contains(keyword)
             || password.username.get().unwrap().contains(keyword);
@@ -198,6 +223,46 @@ async fn main() -> Result<(), NcError> {
                     _ => unreachable!(),
                 };
             }
+        }
+        Some(("set", sub_matches)) => {
+            let id = sub_matches.get_one::<String>("ID").unwrap();
+            let possible_fields = ["label", "username", "password", "url", "notes"];
+            let fields: Vec<(&str, &String)> = possible_fields
+                .iter()
+                .filter_map(|field| {
+                    sub_matches
+                        .get_one::<String>(field)
+                        .map(|value| (*field, value))
+                })
+                .collect();
+
+            let (mut store, _) = prerequisits().await?;
+            let passwords = store.get_passwords().await?;
+            let mut password =
+                passwords
+                    .into_iter()
+                    .find(|p| p.id() == *id)
+                    .ok_or(NcError::Generic(format!(
+                        "Password with id {} not found",
+                        id
+                    )))?;
+            // arg is required
+            if fields.is_empty() {
+                return Err(NcError::Generic("No fields to set".to_string()));
+            }
+
+            for (field, value) in fields.iter() {
+                match *field {
+                    "label" => password.label.set((*value).clone()).unwrap(),
+                    "password" => password.password.set((*value).clone()).unwrap(),
+                    "username" => password.username.set((*value).clone()).unwrap(),
+                    "url" => password.url.set((*value).clone()).unwrap(),
+                    "notes" => password.notes.set((*value).clone()).unwrap(),
+                    _ => unreachable!(),
+                }
+            }
+
+            store.update(&mut password).await?;
         }
         _ => unreachable!(),
     }
