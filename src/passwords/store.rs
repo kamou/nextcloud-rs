@@ -1,6 +1,5 @@
 use crate::client::NextcloudClient;
 use crate::errors::NcError;
-use crate::passwords::fields::FieldAccess;
 use crate::passwords::password::Password;
 use crate::passwords::session::Session;
 use secrecy::SecretString;
