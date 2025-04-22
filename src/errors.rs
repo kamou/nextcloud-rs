@@ -73,4 +73,7 @@ pub enum NcError {
 
     #[error("Password with id {0} not found")]
     PasswordNotFound(String),
+
+    #[error("Sessionn not available.")]
+    SessionUnavailable,
 }

@@ -8,9 +8,8 @@ use std::io::Write;
 
 use nextcloud_rs::client::NextcloudClient;
 use nextcloud_rs::errors::NcError;
-use nextcloud_rs::passwords::Passwords;
-// FIXME: can do better than this (prelude?)
 use nextcloud_rs::passwords::password::Password;
+use nextcloud_rs::passwords::store::PasswordStore;
 
 fn cli() -> Command {
     let get_fields = ["label", "username", "password", "url", "notes"];
@@ -34,12 +33,22 @@ fn cli() -> Command {
                 .arg_required_else_help(true),
         )
         .subcommand(
+            // get id with no option means all
             Command::new("get")
-                .about("Get a password")
+                .about("Get password details.")
                 .arg(arg!(<ID> "the id of the password"))
                 .arg_required_else_help(true)
                 .args(get_args),
         )
+
+    // TODO: other options might be:
+    // - add
+    // - edit
+    // - delete
+    // - import
+    // - export
+    // - sync
+    //
 }
 
 fn load_config() -> Result<AppConfig, NcError> {
@@ -52,8 +61,8 @@ fn load_config() -> Result<AppConfig, NcError> {
     Ok(config)
 }
 
-async fn get_passwords(client: &mut NextcloudClient) -> Result<Passwords, NcError> {
-    let mut passwords = Passwords::new(client);
+async fn get_store(client: &mut NextcloudClient) -> Result<PasswordStore, NcError> {
+    let mut store = PasswordStore::new(client);
 
     loop {
         print!("Please enter your Nextcloud Passwords app master password: ");
@@ -69,7 +78,7 @@ async fn get_passwords(client: &mut NextcloudClient) -> Result<Passwords, NcErro
             continue;
         }
 
-        match passwords.open(input).await {
+        match store.open(input).await {
             Ok(mp) => break mp,
             Err(NcError::UnexpectedResponse { status: 401, .. }) => {
                 error!("Invalid password, please try again.");
@@ -84,16 +93,16 @@ async fn get_passwords(client: &mut NextcloudClient) -> Result<Passwords, NcErro
         }
     }
 
-    Ok(passwords)
+    Ok(store)
 }
 
 async fn print_password_info(password: &Password) -> Result<(), NcError> {
     println!(
         "[{}] {} from {} ({})",
         password.id(),
-        password.label()?.expose_secret(),
-        password.url()?.expose_secret(),
-        password.username()?.expose_secret()
+        password.label.get().unwrap(),
+        password.url.get().unwrap(),
+        password.username.get().unwrap()
     );
 
     Ok(())
@@ -108,37 +117,35 @@ fn is_configured() -> bool {
 
 fn check_config() -> Result<(), NcError> {
     if !is_configured() {
-        return Err(NcError::Generic(
-            "Configuration not found. Please run `passwords configure` first.".to_string(),
-        ));
+        load_config().ok();
     }
     Ok(())
 }
 
-async fn prerequisits() -> Result<(Passwords, AppConfig), NcError> {
+async fn prerequisits() -> Result<(PasswordStore, AppConfig), NcError> {
     check_config()?;
     let config = load_config()?;
     let mut client = NextcloudClient::new(&config.url);
     authenticate(&mut client).await?;
-    let passwords = get_passwords(&mut client).await?;
+    let passwords = get_store(&mut client).await?;
     Ok((passwords, config))
 }
 
 async fn list_passwords() -> Result<(), NcError> {
-    let (passwords, _) = prerequisits().await?;
-    for password in passwords.get_passwords().await? {
+    let (store, _) = prerequisits().await?;
+    for password in &mut store.get_passwords().await? {
         print_password_info(password).await?;
     }
     Ok(())
 }
 
 async fn find_passwords(keyword: &str) -> Result<(), NcError> {
-    let (passwords, _) = prerequisits().await?;
+    let (store, _) = prerequisits().await?;
 
-    for password in passwords.get_passwords().await? {
-        let is_match = password.label()?.expose_secret().contains(keyword)
-            || password.url()?.expose_secret().contains(keyword)
-            || password.username()?.expose_secret().contains(keyword);
+    for password in &store.get_passwords().await? {
+        let is_match = password.label.get().unwrap().contains(keyword)
+            || password.url.get().unwrap().contains(keyword)
+            || password.username.get().unwrap().contains(keyword);
         if is_match {
             print_password_info(password).await?;
         }
@@ -165,20 +172,29 @@ async fn main() -> Result<(), NcError> {
                 .filter(|&&field| sub_matches.get_flag(field))
                 .collect();
 
-            let (passwords, _) = prerequisits().await?;
-            let password = passwords.get_password(id).await?;
+            let (store, _) = prerequisits().await?;
+            let passwords = store.get_passwords().await?;
+            let password = passwords
+                .iter()
+                .find(|p| p.id() == *id)
+                .ok_or(NcError::Generic(format!(
+                    "Password with id {} not found",
+                    id
+                )))?;
 
-            if !fields.is_empty() {
-                for field in fields {
-                    match *field {
-                        "label" => println!("{}", password.label()?.expose_secret()),
-                        "username" => println!("{}", password.username()?.expose_secret()),
-                        "password" => println_secret(&password.password()?)?,
-                        "url" => println!("{}", password.url()?.expose_secret()),
-                        "notes" => println!("{}", password.notes()?.expose_secret()),
-                        _ => unreachable!(),
-                    };
-                }
+            if fields.is_empty() {
+                return print_password_info(password).await;
+            }
+
+            for field in fields {
+                match *field {
+                    "label" => println!("{}", password.label.get().unwrap()),
+                    "username" => println!("{}", password.username.get().unwrap()),
+                    "password" => println!("{}", password.password.get().unwrap()), // FIXME: println will copy the password into heap
+                    "url" => println!("{}", password.url.get().unwrap()),
+                    "notes" => println!("{}", password.notes.get().unwrap()),
+                    _ => unreachable!(),
+                };
             }
         }
         _ => unreachable!(),

@@ -10,148 +10,6 @@ use sodiumoxide::crypto::pwhash::argon2id13;
 use sodiumoxide::crypto::secretbox;
 use std::collections::HashMap;
 
-#[derive(Serialize, Deserialize, Debug)]
-enum CustomFieldType {
-    #[serde(rename = "text")]
-    Text, // Generic text value
-    #[serde(rename = "secret")]
-    Secret, // A secret value which should be treated like a password
-    #[serde(rename = "email")]
-    Email, // An email address
-    #[serde(rename = "url")]
-    Url, // A valid full url. Any protocol is allowed
-    #[serde(rename = "file")]
-    File, // The path to a file accessible over WebDav. The base url of the WebDav service is defined in the setting server.baseUrl.webdav
-    #[serde(rename = "data")]
-    Data, // A field with technical information. Should not be displayed to the user
-}
-
-#[allow(dead_code)]
-#[derive(Deserialize, Debug)]
-struct CustomField {
-    label: SecretString,
-    #[serde(rename = "type")]
-    type_: CustomFieldType,
-    value: SecretString,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-enum SecurityStatus {
-    #[serde(rename = "0")]
-    Good,
-    #[serde(rename = "1")]
-    Duplicate,
-    #[serde(rename = "2")]
-    Breached,
-    #[serde(rename = "3")]
-    NotChecked,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub enum StatusCode {
-    #[serde(rename = "GOOD")]
-    Good,
-    #[serde(rename = "DUPLICATE")]
-    Duplicate,
-    #[serde(rename = "BREACHED")]
-    Breached,
-    #[serde(rename = "NOT_CHECKED")]
-    NotChecked,
-}
-
-#[allow(dead_code)]
-#[derive(Debug, Deserialize)]
-pub struct PasswordObject {
-    id: String,
-    label: SecretString,
-    username: SecretString,
-    password: SecretString,
-    url: SecretString,
-    notes: SecretString,
-    #[serde(rename = "customFields")]
-    custom_fields: Option<Vec<CustomField>>,
-    status: u32,
-    #[serde(rename = "statusCode")]
-    status_code: StatusCode,
-    hash: String,
-    folder: String,
-    revision: String,
-    share: Option<String>,
-    shared: bool,
-    #[serde(rename = "cseType")]
-    cse_type: String,
-    #[serde(rename = "sseType")]
-    sse_type: String,
-    client: String,
-    hidden: bool,
-    trashed: bool,
-    editable: bool,
-    edited: u64,
-    created: u64,
-    updated: u64,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct EncryptedPasswordObject {
-    pub id: String,
-    pub label: String,
-    pub username: String,
-    pub password: String,
-    pub url: String,
-    pub notes: String,
-    #[serde(rename = "customFields")]
-    pub custom_fields: String,
-    pub status: u32,
-    #[serde(rename = "statusCode")]
-    pub status_code: StatusCode,
-    pub hash: String,
-    pub folder: String,
-    pub revision: String,
-    pub share: Option<String>,
-    pub shared: bool,
-    #[serde(rename = "cseType")]
-    pub cse_type: String,
-    #[serde(rename = "sseType")]
-    pub sse_type: String,
-    pub client: String,
-    pub hidden: bool,
-    pub trashed: bool,
-    pub editable: bool,
-    pub edited: u64,
-    pub created: u64,
-    pub updated: u64,
-}
-
-impl EndpointInfo for EncryptedPasswordObject {
-    fn get_info() -> Endpoint {
-        Endpoint {
-            path: "index.php/apps/passwords/api/1.0/password/show".into(),
-            require_auth: true,
-            method: Method::POST,
-        }
-    }
-}
-
-impl EndpointInfo for Vec<EncryptedPasswordObject> {
-    fn get_info() -> Endpoint {
-        Endpoint {
-            path: "index.php/apps/passwords/api/1.0/password/list".into(),
-            require_auth: true,
-            method: Method::POST,
-        }
-    }
-}
-
-#[derive(Debug)]
-pub enum EncryptedField {
-    Label,
-    Username,
-    Password,
-    Url,
-    Notes,
-    CustomFields,
-}
-
 #[derive(Deserialize, Debug, Clone)]
 pub struct KeyChain {
     keys: HashMap<String, SecretString>,
@@ -264,7 +122,7 @@ fn solve_pwdv1_challenge(
     ))
 }
 
-fn decrypt_field(encrypted_str: &String, key: &secretbox::Key) -> Result<SecretString, NcError> {
+fn decrypt_field(encrypted_str: &str, key: &secretbox::Key) -> Result<SecretString, NcError> {
     let encrypted_bytes = hex::decode(encrypted_str)?;
     if encrypted_bytes.is_empty() {
         return Ok("".into());
@@ -282,6 +140,15 @@ fn decrypt_field(encrypted_str: &String, key: &secretbox::Key) -> Result<SecretS
     Ok(SecretString::new(secret_str.into()))
 }
 
+fn encrypt_field(field: &str, key: &secretbox::Key) -> Result<String, NcError> {
+    let nonce = secretbox::gen_nonce();
+    let cipher_bytes = secretbox::seal(field.as_bytes(), &nonce, key);
+    let mut encrypted_bytes = Vec::with_capacity(secretbox::NONCEBYTES + cipher_bytes.len());
+    encrypted_bytes.extend_from_slice(nonce.as_ref());
+    encrypted_bytes.extend_from_slice(cipher_bytes.as_slice());
+    Ok(hex::encode(encrypted_bytes))
+}
+
 #[derive(Clone)]
 pub struct Session {
     client: NextcloudClient,
@@ -294,6 +161,14 @@ impl Session {
             client: client.clone(),
             cse_keychain: None,
         }
+    }
+
+    pub async fn request<T>(&mut self, data: Option<HashMap<&str, &str>>) -> Result<T, NcError>
+    where
+        T: for<'de> Deserialize<'de> + EndpointInfo + Send,
+    {
+        let (obj, _) = self.client.request_with_headers(data).await?;
+        Ok(obj)
     }
 
     pub async fn open(&mut self, master_password: SecretString) -> Result<(), NcError> {
@@ -352,10 +227,6 @@ impl Session {
         self.cse_keychain = None;
     }
 
-    pub async fn get_passwords(&mut self) -> Result<Vec<EncryptedPasswordObject>, NcError> {
-        self.client.request(None).await
-    }
-
     fn decrypt_keychain(
         &self,
         master_password: SecretString,
@@ -396,11 +267,7 @@ impl Session {
         Ok(keychain_json)
     }
 
-    pub fn decrypt_field(
-        &self,
-        object: &EncryptedPasswordObject,
-        field: EncryptedField,
-    ) -> Result<SecretString, NcError> {
+    pub fn decrypt(&self, encrypted_str: &str) -> Result<SecretString, NcError> {
         let key_id = self.cse_keychain.as_ref().unwrap().current.clone();
         let key_str = self
             .cse_keychain
@@ -413,20 +280,22 @@ impl Session {
         let key = secretbox::Key::from_slice(hex::decode(key_str.expose_secret())?.as_slice())
             .ok_or_else(|| NcError::Generic("Invalid secret key format".into()))?;
 
-        match field {
-            EncryptedField::Label => decrypt_field(&object.label, &key),
-            EncryptedField::Username => decrypt_field(&object.username, &key),
-            EncryptedField::Password => decrypt_field(&object.password, &key),
-            EncryptedField::Url => decrypt_field(&object.url, &key),
-            EncryptedField::Notes => decrypt_field(&object.notes, &key),
-            EncryptedField::CustomFields => {
-                if !object.custom_fields.is_empty() {
-                    let json_str = decrypt_field(&object.custom_fields, &key)?;
-                    Ok(serde_json::from_str(json_str.expose_secret())?)
-                } else {
-                    Ok(SecretString::default())
-                }
-            }
-        }
+        decrypt_field(encrypted_str, &key)
+    }
+
+    pub fn encrypt(&self, value: &str) -> Result<String, NcError> {
+        let key_id = self.cse_keychain.as_ref().unwrap().current.clone();
+        let key_str = self
+            .cse_keychain
+            .as_ref()
+            .unwrap()
+            .keys
+            .get(&key_id)
+            .ok_or_else(|| NcError::Generic("Current key ID not found in keychain".into()))?;
+
+        let key = secretbox::Key::from_slice(hex::decode(key_str.expose_secret())?.as_slice())
+            .ok_or_else(|| NcError::Generic("Invalid secret key format".into()))?;
+
+        encrypt_field(value, &key)
     }
 }
