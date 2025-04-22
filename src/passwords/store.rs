@@ -43,13 +43,9 @@ impl PasswordStore {
     }
 
     pub async fn update(&mut self, password: &mut Password) -> Result<(), NcError> {
-        println!("Updating password");
         password.label.inject_session(self.session.clone());
         let encrypted_json = password.serialize_encrypted()?;
-        println!("Updating password next");
-        println!("encrypted_json: {:?}", encrypted_json);
         let ej_to_hm: HashMap<&str, &str> = serde_json::from_str(&encrypted_json)?;
-        println!("ej_to_hm: {:?}", ej_to_hm);
         let _: UpdatePassword = self.session.request(Some(ej_to_hm)).await?;
         Ok(())
     }
