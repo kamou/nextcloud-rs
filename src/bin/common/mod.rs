@@ -23,12 +23,14 @@ impl Default for AppConfig {
             let mut input = String::new();
             io::stdin().read_line(&mut input).ok();
 
-            let url = input.trim();
+            let mut url = input.trim().to_string();
             if url.is_empty() {
                 continue;
             }
 
-            if url::Url::parse(url).is_ok() {
+            url.push('/');
+
+            if url::Url::parse(url.as_str()).is_ok() {
                 return Self {
                     url: url.to_string(),
                 };
