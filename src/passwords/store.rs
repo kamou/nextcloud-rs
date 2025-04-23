@@ -1,5 +1,5 @@
-use crate::client::NextcloudClient;
 use crate::errors::NcError;
+use crate::ocs_client::NextcloudOCSClient;
 use crate::passwords::password::{Password, UpdatePassword};
 use crate::passwords::session::Session;
 use secrecy::SecretString;
@@ -11,7 +11,7 @@ pub struct PasswordStore {
 }
 
 impl PasswordStore {
-    pub fn new(client: NextcloudClient) -> Self {
+    pub fn new(client: NextcloudOCSClient) -> Self {
         PasswordStore {
             session: Session::new(client),
             cache: Vec::new(),

@@ -1,6 +1,6 @@
 mod common;
 use common::{AppConfig, authenticate, secure_println};
-use nextcloud_rs::client::NextcloudClient;
+use nextcloud_rs::ocs_client::NextcloudOCSClient;
 use secrecy::{ExposeSecret, SecretString};
 use std::io::Write;
 
@@ -20,7 +20,7 @@ async fn main() -> Result<(), NcError> {
         "config",
     )?;
 
-    let mut client = NextcloudClient::new(&config.url);
+    let mut client = NextcloudOCSClient::new(&config.url);
     authenticate(&mut client).await?;
 
     let mut passwords = Passwords::new(&client);

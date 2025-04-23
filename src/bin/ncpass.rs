@@ -7,8 +7,8 @@ use rpassword::read_password;
 use secrecy::{ExposeSecret, SecretString};
 use std::io::Write;
 
-use nextcloud_rs::client::NextcloudClient;
 use nextcloud_rs::errors::NcError;
+use nextcloud_rs::ocs_client::NextcloudOCSClient;
 use nextcloud_rs::passwords::fields::FieldAccess;
 use nextcloud_rs::passwords::password::Password;
 use nextcloud_rs::passwords::store::PasswordStore;
@@ -88,7 +88,7 @@ fn load_config() -> Result<AppConfig, NcError> {
     Ok(config)
 }
 
-async fn get_store<'p>(client: NextcloudClient) -> Result<PasswordStore, NcError> {
+async fn get_store<'p>(client: NextcloudOCSClient) -> Result<PasswordStore, NcError> {
     let mut store = PasswordStore::new(client);
 
     loop {
@@ -152,7 +152,7 @@ fn check_config() -> Result<(), NcError> {
 async fn prerequisits() -> Result<(PasswordStore, AppConfig), NcError> {
     check_config()?;
     let config = load_config()?;
-    let mut client = NextcloudClient::new(&config.url);
+    let mut client = NextcloudOCSClient::new(&config.url);
     authenticate(&mut client).await?;
     let passwords = get_store(client).await?;
     Ok((passwords, config))

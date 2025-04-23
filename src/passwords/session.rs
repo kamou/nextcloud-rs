@@ -1,6 +1,6 @@
-use crate::client::NextcloudClient;
 use crate::endpoint::{Endpoint, EndpointInfo};
 use crate::errors::NcError;
+use crate::ocs_client::NextcloudOCSClient;
 use reqwest::Method;
 use reqwest::header::{HeaderMap, HeaderName};
 use secrecy::{ExposeSecret, ExposeSecretMut, SecretBox, SecretString};
@@ -151,12 +151,12 @@ fn encrypt_field(field: &str, key: &secretbox::Key) -> Result<String, NcError> {
 
 #[derive(Clone)]
 pub struct Session {
-    client: NextcloudClient,
+    client: NextcloudOCSClient,
     cse_keychain: Option<KeyChain>,
 }
 
 impl Session {
-    pub fn new(client: NextcloudClient) -> Session {
+    pub fn new(client: NextcloudOCSClient) -> Session {
         Session {
             client: client.clone(),
             cse_keychain: None,

@@ -89,7 +89,7 @@ impl EndpointInfo for OcsResponse<UserStatus> {
 }
 
 #[derive(Clone, Debug)]
-pub struct NextcloudClient {
+pub struct NextcloudOCSClient {
     client: Client,
     server_url: String,
     auth_data_tx: watch::Sender<Option<AuthData>>,
@@ -120,10 +120,10 @@ async fn poll_authentication(
     }
 }
 
-impl NextcloudClient {
+impl NextcloudOCSClient {
     pub fn new(server_url: &str) -> Self {
         let (auth_data_tx, auth_data_rx) = watch::channel(None);
-        NextcloudClient {
+        NextcloudOCSClient {
             client: Client::new(),
             server_url: server_url.to_owned(),
             auth_data_tx,

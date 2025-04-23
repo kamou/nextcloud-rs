@@ -1,4 +1,4 @@
-use crate::client::AuthData;
+use crate::ocs_client::AuthData;
 use confy;
 use reqwest::header::InvalidHeaderName;
 use thiserror::Error;

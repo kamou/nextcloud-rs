@@ -1,8 +1,8 @@
 use libc::{STDOUT_FILENO, write};
 use log::{error, info};
-use nextcloud_rs::client::AuthData;
-use nextcloud_rs::client::NextcloudClient;
 use nextcloud_rs::errors::NcError;
+use nextcloud_rs::ocs_client::AuthData;
+use nextcloud_rs::ocs_client::NextcloudOCSClient;
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 use std::io::Write;
@@ -14,7 +14,7 @@ pub struct AppConfig {
     pub url: String,
 }
 
-pub async fn authenticate(client: &mut NextcloudClient) -> Result<(), NcError> {
+pub async fn authenticate(client: &mut NextcloudOCSClient) -> Result<(), NcError> {
     let mut login_required = true;
     if let Some(auth) = load_auth_data("auth_data.json") {
         match client.login_from_auth_data(&auth).await {
